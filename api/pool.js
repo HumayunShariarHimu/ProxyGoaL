@@ -1,7 +1,7 @@
 // ProxyGoaL pool endpoint. The frontend calls /api/pool; keep the filename aligned.
 import { loadCandidates, pool, requestJsonThroughProxy, runPool, normalizeProxy, json, jerr } from './_lib.js';
 
-export const config = { runtime: 'nodejs20.x', maxDuration: 10 };
+export const config = { runtime: 'nodejs', maxDuration: 10 };
 const BATCH_SIZE = 12;
 
 export default async function handler(req, res) {
