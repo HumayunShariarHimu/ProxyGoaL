@@ -1,63 +1,98 @@
-// api/rotate.js — performs one proxy rotation + fetches exit-node IP info
+// api/rotate.js — one rotation via a random proxy from the pool
+// Author: Humayun Shariar Himu
 import { ProxyAgent } from 'undici';
+import { ensurePool, pickRandom, getPool } from './pool.js';
 
 const IPINFO_URL = 'https://ipinfo.io/json';
-const TIMEOUT_MS = 10000;
-
-let rrCounter = 0; // round-robin cursor for static pool
-
-function parsePool() {
-  return (process.env.PROXY_LIST || '')
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean);
-}
+const TIMEOUT_MS = 9000;
 
 function normalizeProxyUrl(url) {
   if (!url) return null;
-  if (!/^https?:\/\//i.test(url)) return 'http://' + url;
-  return url;
+  return /^https?:\/\//i.test(url) ? url : 'http://' + url;
 }
 
-function pickProxy(mode) {
-  if (mode === 'direct') return { url: null, label: 'direct' };
-
+async function pickProxy(mode) {
+  // 1. Rotating endpoint (user's paid service) — highest priority
   const endpoint = (process.env.ROTATING_PROXY_URL || '').trim();
-  if (endpoint) {
+  if (endpoint && mode !== 'free' && mode !== 'direct') {
     return { url: normalizeProxyUrl(endpoint), label: 'rotating-endpoint' };
   }
 
-  const pool = parsePool();
-  if (pool.length) {
-    const idx = rrCounter % pool.length;
-    rrCounter++;
-    return { url: normalizeProxyUrl(pool[idx]), label: `pool[${idx}]` };
+  // 2. Direct mode — no proxy
+  if (mode === 'direct') {
+    return { url: null, label: 'direct' };
   }
 
-  return { url: null, label: 'direct' };
+  // 3. Pool mode (free + user pool) — ensure pool is fresh
+  await ensurePool();
+  const p = pickRandom();
+  if (!p) {
+    return { url: null, label: 'pool:EMPTY', empty: true };
+  }
+  return {
+    url: p.proxy,
+    label: p.userProvided ? 'user:' + p.hostPort : 'free:' + p.hostPort,
+    exitIp: p.exitIp,
+    proxyLatency: p.latency
+  };
 }
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
   res.setHeader('Content-Type', 'application/json');
 
-  const mode = req.query?.mode === 'direct' ? 'direct' : 'auto';
-  const t0 = Date.now();
+  const mode = ['direct', 'free', 'auto'].includes(req.query?.mode)
+    ? req.query.mode
+    : 'auto';
 
-  const { url: proxyUrl, label: proxyLabel } = pickProxy(mode);
+  const t0 = Date.now();
+  let picked;
+  try {
+    picked = await pickProxy(mode);
+  } catch (e) {
+    return res.status(500).json({
+      ok: false,
+      error: 'pool build failed: ' + e.message,
+      latency: Date.now() - t0,
+      ts: Date.now()
+    });
+  }
+
+  if (picked.empty) {
+    // If pool is empty, try to build it once more, then give up
+    await ensurePool(true);
+    const p2 = pickRandom();
+    if (!p2) {
+      return res.status(503).json({
+        ok: false,
+        error: 'proxy pool empty — no working proxies found. Try again in ~20s or add your own PROXY_LIST.',
+        proxy: 'pool:EMPTY',
+        poolSize: getPool().working.length,
+        latency: Date.now() - t0,
+        ts: Date.now()
+      });
+    }
+    picked = {
+      url: p2.proxy,
+      label: p2.userProvided ? 'user:' + p2.hostPort : 'free:' + p2.hostPort,
+      exitIp: p2.exitIp,
+      proxyLatency: p2.latency
+    };
+  }
 
   let dispatcher;
-  if (proxyUrl) {
+  if (picked.url) {
     try {
       dispatcher = new ProxyAgent({
-        uri: proxyUrl,
-        requestTls: { rejectUnauthorized: false }
+        uri: picked.url,
+        requestTls: { rejectUnauthorized: false },
+        connect: { timeout: 6000 }
       });
     } catch (e) {
       return res.status(400).json({
         ok: false,
-        error: 'invalid proxy url: ' + e.message,
-        proxy: proxyLabel,
+        error: 'invalid proxy: ' + e.message,
+        proxy: picked.label,
         latency: Date.now() - t0,
         ts: Date.now()
       });
@@ -69,12 +104,11 @@ export default async function handler(req, res) {
       dispatcher,
       signal: AbortSignal.timeout(TIMEOUT_MS),
       headers: {
-        'User-Agent': 'ProxyGoaL/1.0 (+https://github.com/)',
+        'User-Agent': 'ProxyGoaL/2.0 (+https://github.com/humayunshariarhimu)',
         Accept: 'application/json'
       }
     });
-
-    if (!r.ok) throw new Error('ipinfo responded ' + r.status);
+    if (!r.ok) throw new Error('ipinfo HTTP ' + r.status);
 
     const data = await r.json();
     const [lat = '', lon = ''] = (data.loc || ',').split(',');
@@ -89,18 +123,20 @@ export default async function handler(req, res) {
       org: data.org || '',
       asn: data.org || '',
       timezone: data.timezone || '',
-      lat,
-      lon,
-      proxy: proxyLabel,
+      lat, lon,
+      proxy: picked.label,
+      proxyLatency: picked.proxyLatency || 0,
       latency: Date.now() - t0,
+      poolSize: getPool().working.length,
       ts: Date.now()
     });
   } catch (err) {
     res.status(502).json({
       ok: false,
       error: err?.message || 'proxy request failed',
-      proxy: proxyLabel,
+      proxy: picked.label,
       latency: Date.now() - t0,
+      poolSize: getPool().working.length,
       ts: Date.now()
     });
   }
