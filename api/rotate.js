@@ -42,24 +42,36 @@ export default async function handler(req, res) {
       if (result) return json(res, 200, output(result.data, 'endpoint', Date.now() - started, pool.working.length));
     }
 
-    const choices = [...configured, ...pool.working.map((item) => item.proxy).filter(Boolean)];
-    if (choices.length === 0) {
+    let choices = [...configured, ...pool.working.map((item) => item.proxy).filter(Boolean)];
+    const discoverMore = async (limit = 40) => {
       const candidates = await loadCandidates(false);
-      const fresh = candidates.filter((candidate) => !pool.seen.has(candidate)).slice(0, 30);
+      const fresh = candidates.filter((candidate) => !pool.seen.has(candidate)).slice(0, limit);
       fresh.forEach((candidate) => pool.seen.add(candidate));
       const working = await Promise.all(fresh.map(async (hostPort) => {
         const proxy = normalizeProxy(hostPort);
         const result = await requestJsonThroughProxy(proxy, 3000);
-        return result ? { proxy, latency: result.latency } : null;
+        return result ? { proxy, ip: result.data.ip, latency: result.latency } : null;
       }));
-      working.filter(Boolean).forEach((item) => pool.working.push(item));
+      const knownIps = new Set(pool.working.map((item) => item.ip).filter(Boolean));
+      working.filter(Boolean).forEach((item) => {
+        if (!knownIps.has(item.ip)) {
+          knownIps.add(item.ip);
+          pool.working.push(item);
+        }
+      });
       pool.working = pool.working.slice(-100);
       pool.stats.tested += fresh.length;
       pool.stats.working = pool.working.length;
+    };
+
+    choices = choices.filter((proxy, index, list) => list.indexOf(proxy) === index && proxy !== previous);
+    if (choices.length < 4) {
+      await discoverMore(40);
+      choices = [...configured, ...pool.working.map((item) => item.proxy).filter(Boolean)]
+        .filter((proxy, index, list) => list.indexOf(proxy) === index && proxy !== previous);
     }
 
-    const available = [...configured, ...pool.working.map((item) => item.proxy).filter(Boolean)]
-      .filter((proxy, index, list) => list.indexOf(proxy) === index && proxy !== previous);
+    const available = choices;
     for (const proxy of available.sort(() => Math.random() - 0.5).slice(0, 6)) {
       const result = await requestJsonThroughProxy(proxy, 3500);
       if (result && result.data.ip !== previousIp) {

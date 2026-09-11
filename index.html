@@ -323,11 +323,6 @@ select:focus{border-color:var(--line-hot);box-shadow:0 0 8px rgba(0,255,156,.55)
   </div>
 </header>
 
-<div class="banner" id="setupBanner" hidden>
-  <strong>⚠ NO PROXY SOURCE</strong>
-  <span>Add <code>PROXY_LIST</code> or <code>ROTATING_PROXY_URL</code> env vars in Vercel for reliable rotation, or use <b>FREE POOL</b> mode for demo (unreliable public proxies).</span>
-</div>
-
 <main class="layout">
 
   <section class="panel panel--exit" style="grid-area:exit">
@@ -435,7 +430,7 @@ select:focus{border-color:var(--line-hot);box-shadow:0 0 8px rgba(0,255,156,.55)
   const $ = (id) => document.getElementById(id);
 
   const statusPill=$('statusPill'), statusText=$('statusText');
-  const setupBanner=$('setupBanner'), modeBadge=$('modeBadge');
+  const modeBadge=$('modeBadge');
   const ipValue=$('ipValue'), chainProxy=$('chainProxy'), copyBtn=$('copyBtn');
   const poolInfo=$('poolInfo');
   const mCountry=$('mCountry'), mCity=$('mCity'), mRegion=$('mRegion');
@@ -572,14 +567,12 @@ select:focus{border-color:var(--line-hot);box-shadow:0 0 8px rgba(0,255,156,.55)
     try{
       const d = await fetchJson('/api/info?_='+Date.now());
       state.backendOk = true;
-      const poolTxt=d.poolSize>0?`<span class="ok">${d.poolSize} working</span>`:`<span class="bad">empty</span>`;
+      const target=d.targetExits||50;
+      const poolTxt=d.poolSize>0?`<span class="ok">${d.poolSize}/${target} verified exits</span>`:`<span class="bad">0/${target} ready</span>`;
       const modeTxt=d.hasEndpoint?`<span class="ok">endpoint</span>`:
                      d.userPoolSize?`<span class="ok">user pool (${d.userPoolSize})</span>`:
                      `<span class="warn">public only</span>`;
       poolInfo.innerHTML=`POOL: <b>${poolTxt}</b> · SOURCE: <b>${modeTxt}</b> · mode: <b>${d.mode}</b>`;
-      if(d.poolSize===0 && !d.hasEndpoint && !d.userPoolSize){
-        setupBanner.hidden=false;
-      } else setupBanner.hidden=true;
     }catch(e){
       state.backendOk = false;
       poolInfo.innerHTML=`POOL: <span class="bad">backend offline</span> · click <b>⚕ DIAGNOSTICS</b>`;
@@ -615,7 +608,8 @@ select:focus{border-color:var(--line-hot);box-shadow:0 0 8px rgba(0,255,156,.55)
     log('building proxy pool in batches of 25 (Vercel timeout-safe)…','warn');
 
     let total=0, rounds=0, emptyRounds=0;
-    const MAX_ROUNDS=8;
+    const TARGET_EXITS=50;
+    const MAX_ROUNDS=20;
 
     // reset pool
     try{
@@ -634,7 +628,8 @@ select:focus{border-color:var(--line-hot);box-shadow:0 0 8px rgba(0,255,156,.55)
         log(`round ${rounds}: +${batchW} working / tested ${d.batchTested||0} → pool=${total}`,'info');
         if(batchW===0) emptyRounds++; else emptyRounds=0;
 
-        if(d.done||((d.remaining||0)<=0)){ log('pool fully built','ok'); break; }
+        if(total>=TARGET_EXITS){ log(`target reached → ${total} distinct exits ready`,'ok'); break; }
+        if(d.done||((d.remaining||0)<=0)){ log('all available candidates tested','ok'); break; }
         if(emptyRounds>=3 && total===0){ log('no working proxies after 3 empty rounds — stopping','err'); break; }
       }catch(e){ log('pool round '+rounds+' failed: '+e.message,'err'); break; }
     }

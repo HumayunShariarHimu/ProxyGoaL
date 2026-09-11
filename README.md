@@ -5,6 +5,7 @@ ProxyGoaL is a browser dashboard for checking exit IP information through a rota
 ## What is included
 
 - Multi-source public proxy discovery with deduplication and validation.
+- Maintained sources from Proxmint, Relayglass, ProxyScrape, and Proxifly; these publish recently re-validated HTTP, HTTPS, SOCKS4, and SOCKS5 lists or protocol-separated JSON/TXT mirrors.
 - Working-proxy health checks before a proxy is used for rotation.
 - Automatic retry and dead-proxy removal.
 - Direct mode, free public-pool mode, user-managed proxy-list mode, and a configured rotating-endpoint mode.
@@ -12,9 +13,15 @@ ProxyGoaL is a browser dashboard for checking exit IP information through a rota
 - Serverless-compatible API endpoints for Vercel.
 - A responsive dashboard with diagnostics, pool refresh, manual rotation, and continuous rotation controls.
 
+## Rotation design
+
+The dashboard uses the validated public HTTP/HTTPS/SOCKS sources above, tests each candidate through an IP echo endpoint, records the real exit IP, and keeps only one proxy per distinct exit IP. It progressively builds the pool in bounded batches and skips the previous proxy and previous exit IP during continuous rotation. The target is a pool of at least 50 distinct verified exit IPs; the UI reports the actual number currently available rather than pretending that a dead or duplicate proxy is a new IP.
+
+Public proxies are volatile. A source can publish hundreds of entries while only a smaller subset is reachable from the current Vercel region. If fewer than 50 distinct exits are currently reachable, the application continues sampling on later refresh/rotation requests and reports a truthful failure when no new exit is available.
+
 ## Environment variables
 
-The application can run in free-pool mode without environment variables, but public proxies are temporary and unreliable. For dependable operation, configure one of the following in the deployment environment:
+The application runs in free-pool mode without environment variables. For an operator-controlled pool, configure one of the following in the deployment environment:
 
 - `PROXY_LIST`: comma-separated HTTP proxy values such as `http://host:port,host:port`.
 - `ROTATING_PROXY_URL`: one authorized rotating proxy endpoint.
@@ -43,7 +50,7 @@ Open the local URL printed by Vercel. The static dashboard is served from `index
 
 ## Important deployment note
 
-A serverless function is stateless between cold starts. The application therefore treats the pool as a performance cache and can discover and test candidates during rotation requests. For predictable production rotation, set `PROXY_LIST` or `ROTATING_PROXY_URL`; public free proxies are not a reliable production transport.
+A serverless function is stateless between cold starts, so the pool is a best-effort warm-instance cache. The app never claims that an untested proxy is working or that two proxies provide different exits. For sensitive or guaranteed availability use only proxies you own or are explicitly authorized to use.
 
 ## License
 

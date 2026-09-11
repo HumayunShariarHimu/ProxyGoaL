@@ -15,6 +15,8 @@ export default function handler(req, res) {
     hasEndpoint: !!endpoint,
     userPoolSize: userPool.length,
     poolSize: pool.working.length,
+    targetExits: 50,
+    sourceCount: pool.stats.sources,
     poolAge: pool.sourceTs ? Date.now() - pool.sourceTs : 0,
     poolBuilding: pool.building,
     stats: pool.stats,

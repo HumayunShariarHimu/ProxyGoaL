@@ -12,6 +12,7 @@
   "dependencies": {
     "http-proxy-agent": "^7.0.2",
     "https-proxy-agent": "^7.0.5",
-    "node-fetch": "^3.3.2"
+    "node-fetch": "^3.3.2",
+    "socks-proxy-agent": "^8.0.5"
   }
 }
