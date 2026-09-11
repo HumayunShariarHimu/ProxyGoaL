@@ -43,7 +43,7 @@ export default async function handler(req, res) {
     }
 
     let choices = [...configured, ...pool.working.map((item) => item.proxy).filter(Boolean)];
-    const discoverMore = async (limit = 40) => {
+    const discoverMore = async (limit = 80) => {
       const candidates = await loadCandidates(false);
       const fresh = candidates.filter((candidate) => !pool.seen.has(candidate)).slice(0, limit);
       fresh.forEach((candidate) => pool.seen.add(candidate));
@@ -66,7 +66,7 @@ export default async function handler(req, res) {
 
     choices = choices.filter((proxy, index, list) => list.indexOf(proxy) === index && proxy !== previous);
     if (choices.length < 4) {
-      await discoverMore(40);
+      await discoverMore(80);
       choices = [...configured, ...pool.working.map((item) => item.proxy).filter(Boolean)]
         .filter((proxy, index, list) => list.indexOf(proxy) === index && proxy !== previous);
     }

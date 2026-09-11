@@ -1,7 +1,7 @@
 // ProxyGoaL pool endpoint. The frontend calls /api/pool; keep the filename aligned.
 import { loadCandidates, pool, requestJsonThroughProxy, runPool, normalizeProxy, json, jerr } from '../lib/proxy.js';
 
-const BATCH_SIZE = 30;
+const BATCH_SIZE = 80;
 
 export default async function handler(req, res) {
   try {
@@ -18,7 +18,7 @@ export default async function handler(req, res) {
     const candidates = await loadCandidates(false);
     const fresh = candidates.filter((candidate) => !pool.seen.has(candidate)).slice(0, BATCH_SIZE);
     fresh.forEach((candidate) => pool.seen.add(candidate));
-    const working = await runPool(fresh, BATCH_SIZE, async (hostPort) => {
+    const working = await runPool(fresh, 40, async (hostPort) => {
       const proxy = normalizeProxy(hostPort);
       const result = await requestJsonThroughProxy(proxy, 2800);
       return result ? { proxy, ip: result.data.ip, latency: result.latency } : null;
