@@ -1,0 +1,13 @@
+{
+  "name": "proxygoal",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "ProxyGoaL — real-time proxy rotation & exit-IP tracker (neon hacker dashboard)",
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "undici": "^6.19.8"
+  }
+}
