@@ -1,13 +1,11 @@
 {
   "name": "proxygoal",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "private": true,
   "type": "module",
-  "description": "ProxyGoaL — real-time proxy rotation & exit-IP tracker (neon hacker dashboard)",
-  "engines": {
-    "node": ">=18"
-  },
-  "dependencies": {
-    "undici": "^6.19.8"
-  }
+  "description": "ProxyGoaL v2 — real multi-source proxy rotation & exit-IP tracker by Humayun Shariar Himu",
+  "author": "Humayun Shariar Himu",
+  "license": "MIT",
+  "engines": { "node": ">=18" },
+  "dependencies": { "undici": "^6.19.8" }
 }
