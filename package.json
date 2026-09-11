@@ -10,6 +10,8 @@
     "node": "20.x"
   },
   "dependencies": {
-    "https-proxy-agent": "^7.0.5"
+    "http-proxy-agent": "^7.0.2",
+    "https-proxy-agent": "^7.0.5",
+    "node-fetch": "^3.3.2"
   }
 }

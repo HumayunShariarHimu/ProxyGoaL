@@ -32,6 +32,7 @@ export default async function handler(req, res) {
 
     const endpoint = mode !== 'free' ? normalizeProxy(process.env.ROTATING_PROXY_URL) : null;
     const previous = String(req.query?.previous || '').trim();
+    const previousIp = String(req.query?.previousIp || '').trim();
     const configured = mode !== 'free'
       ? (process.env.PROXY_LIST || '').split(',').map(normalizeProxy).filter(Boolean)
       : [];
@@ -61,7 +62,10 @@ export default async function handler(req, res) {
       .filter((proxy, index, list) => list.indexOf(proxy) === index && proxy !== previous);
     for (const proxy of available.sort(() => Math.random() - 0.5).slice(0, 6)) {
       const result = await requestJsonThroughProxy(proxy, 3500);
-      if (result) return json(res, 200, output(result.data, proxy, Date.now() - started, pool.working.length));
+      if (result && result.data.ip !== previousIp) {
+        pool.working = pool.working.map((item) => item.proxy === proxy ? { ...item, ip: result.data.ip, latency: result.latency } : item);
+        return json(res, 200, output(result.data, proxy, Date.now() - started, pool.working.length));
+      }
       pool.working = pool.working.filter((item) => item.proxy !== proxy);
     }
 

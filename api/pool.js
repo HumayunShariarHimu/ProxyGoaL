@@ -21,9 +21,14 @@ export default async function handler(req, res) {
     const working = await runPool(fresh, BATCH_SIZE, async (hostPort) => {
       const proxy = normalizeProxy(hostPort);
       const result = await requestJsonThroughProxy(proxy, 2800);
-      return result ? { proxy, latency: result.latency } : null;
+      return result ? { proxy, ip: result.data.ip, latency: result.latency } : null;
     });
-    pool.working.push(...working);
+    const knownIps = new Set(pool.working.map((item) => item.ip).filter(Boolean));
+    pool.working.push(...working.filter((item) => {
+      if (!item.ip || knownIps.has(item.ip)) return false;
+      knownIps.add(item.ip);
+      return true;
+    }));
     pool.working.sort((a, b) => a.latency - b.latency);
     if (pool.working.length > 100) pool.working.length = 100;
     pool.stats.tested += fresh.length;
