@@ -447,7 +447,7 @@ select:focus{border-color:var(--line-hot);box-shadow:0 0 8px rgba(0,255,156,.55)
   const state={
     running:false, timer:null, rotations:0,
     uniqueIps:new Set(), countries:new Set(), latencies:[],
-    recent:[], busy:false, consecutiveErrors:0, lastProxy:'', lastIp:'',
+    recent:[], busy:false, consecutiveErrors:0, lastProxy:'', lastIp:'', recentIps:[],
     backendOk:null // null=unknown, true/false
   };
 
@@ -492,7 +492,8 @@ select:focus{border-color:var(--line-hot);box-shadow:0 0 8px rgba(0,255,156,.55)
     try{
       const previous = state.lastProxy ? `&previous=${encodeURIComponent(state.lastProxy)}` : '';
       const previousIp = state.lastIp ? `&previousIp=${encodeURIComponent(state.lastIp)}` : '';
-      const d = await fetchJson(`/api/rotate?mode=${mode}${previous}${previousIp}&_=${Date.now()}`);
+      const excluded = state.recentIps.length ? `&excludeIps=${encodeURIComponent(state.recentIps.join(','))}` : '';
+      const d = await fetchJson(`/api/rotate?mode=${mode}${previous}${previousIp}${excluded}&_=${Date.now()}`);
       if(d.ok){state.consecutiveErrors=0;applyResult(d);}
       else{state.consecutiveErrors++;applyError(d);}
     }catch(e){state.consecutiveErrors++;applyError({error:e.message,proxy:mode,latency:0});}
@@ -502,6 +503,7 @@ select:focus{border-color:var(--line-hot);box-shadow:0 0 8px rgba(0,255,156,.55)
   function applyResult(d){
     state.lastProxy = d.proxy || '';
     state.lastIp = d.ip || '';
+    if(d.ip){ state.recentIps = [d.ip, ...state.recentIps.filter((ip)=>ip!==d.ip)].slice(0,50); }
     state.rotations++;
     state.uniqueIps.add(d.ip);
     if(d.country) state.countries.add(d.country);
@@ -672,7 +674,7 @@ select:focus{border-color:var(--line-hot);box-shadow:0 0 8px rgba(0,255,156,.55)
   onceBtn.addEventListener('click',()=>{log('manual rotation triggered','info');rotateOnce();});
   clearBtn.addEventListener('click',()=>{
     logEl.innerHTML='';
-    state.recent=[]; state.rotations=0;
+    state.recent=[]; state.recentIps=[]; state.rotations=0;
     state.uniqueIps.clear(); state.countries.clear(); state.latencies=[];
     updateStats(); renderRecent();
     log('telemetry + log cleared','warn');

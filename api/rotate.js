@@ -33,6 +33,7 @@ export default async function handler(req, res) {
     const endpoint = mode !== 'free' ? normalizeProxy(process.env.ROTATING_PROXY_URL) : null;
     const previous = String(req.query?.previous || '').trim();
     const previousIp = String(req.query?.previousIp || '').trim();
+    const excludedIps = new Set(String(req.query?.excludeIps || '').split(',').map((ip) => ip.trim()).filter(Boolean));
     const configured = mode !== 'free'
       ? (process.env.PROXY_LIST || '').split(',').map(normalizeProxy).filter(Boolean)
       : [];
@@ -71,10 +72,13 @@ export default async function handler(req, res) {
         .filter((proxy, index, list) => list.indexOf(proxy) === index && proxy !== previous);
     }
 
-    const available = choices;
+    const knownAvailable = pool.working
+      .filter((item) => item.ip && !excludedIps.has(item.ip) && item.proxy !== previous)
+      .map((item) => item.proxy);
+    const available = [...new Set(knownAvailable.length >= 2 ? knownAvailable : choices)];
     for (const proxy of available.sort(() => Math.random() - 0.5).slice(0, 6)) {
       const result = await requestJsonThroughProxy(proxy, 3500);
-      if (result && result.data.ip !== previousIp) {
+      if (result && result.data.ip !== previousIp && !excludedIps.has(result.data.ip)) {
         pool.working = pool.working.map((item) => item.proxy === proxy ? { ...item, ip: result.data.ip, latency: result.latency } : item);
         return json(res, 200, output(result.data, proxy, Date.now() - started, pool.working.length));
       }
