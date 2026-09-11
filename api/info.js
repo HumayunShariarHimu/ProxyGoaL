@@ -1,6 +1,6 @@
 // api/info.js — pool status
 // Author: Humayun Shariar Himu
-import { pool, json } from './_lib.js';
+import { pool, json } from '../lib/proxy.js';
 
 export const config = { runtime: 'nodejs' };
 
@@ -15,7 +15,7 @@ export default function handler(req, res) {
     hasEndpoint: !!endpoint,
     userPoolSize: userPool.length,
     poolSize: pool.working.length,
-    poolAge: pool.ts ? Date.now() - pool.ts : 0,
+    poolAge: pool.sourceTs ? Date.now() - pool.sourceTs : 0,
     poolBuilding: pool.building,
     stats: pool.stats,
     author: 'Humayun Shariar Himu',

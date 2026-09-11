@@ -1,7 +1,5 @@
 // ProxyGoaL rotation endpoint.
-import { pool, normalizeProxy, requestDirect, requestJsonThroughProxy, loadCandidates, json, jerr } from './_lib.js';
-
-export const config = { runtime: 'nodejs', maxDuration: 10 };
+import { pool, normalizeProxy, requestDirect, requestJsonThroughProxy, loadCandidates, json, jerr } from '../lib/proxy.js';
 
 function output(data, proxy, latency, poolSize) {
   const [lat = '', lon = ''] = String(data.loc || ',').split(',');
