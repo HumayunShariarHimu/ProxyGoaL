@@ -45,7 +45,7 @@ export default async function handler(req, res) {
     const choices = [...configured, ...pool.working.map((item) => item.proxy).filter(Boolean)];
     if (choices.length === 0) {
       const candidates = await loadCandidates(false);
-      const fresh = candidates.filter((candidate) => !pool.seen.has(candidate)).slice(0, 8);
+      const fresh = candidates.filter((candidate) => !pool.seen.has(candidate)).slice(0, 30);
       fresh.forEach((candidate) => pool.seen.add(candidate));
       const working = await Promise.all(fresh.map(async (hostPort) => {
         const proxy = normalizeProxy(hostPort);
