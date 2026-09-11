@@ -1,5 +1,4 @@
 // ProxyGoaL shared serverless utilities.
-import { HttpProxyAgent } from 'http-proxy-agent';
 import { HttpsProxyAgent } from 'https-proxy-agent';
 import fetch from 'node-fetch';
 
@@ -54,9 +53,7 @@ export async function fetchSource(url, timeoutMs = 5000) {
 }
 
 function proxyAgent(proxyUrl, targetUrl) {
-  return targetUrl.startsWith('https:')
-    ? new HttpsProxyAgent(proxyUrl, { rejectUnauthorized: false })
-    : new HttpProxyAgent(proxyUrl);
+  return new HttpsProxyAgent(proxyUrl, { rejectUnauthorized: false });
 }
 
 export async function requestJsonThroughProxy(proxyUrl, timeoutMs = 3500) {
