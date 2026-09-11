@@ -1,96 +1,76 @@
-// api/rotate.js — one rotation via random proxy from pool
-// Author: Humayun Shariar Himu
-import { HttpsProxyAgent } from 'https-proxy-agent';
-import fetch from 'node-fetch';
-import { pool, normalizeProxy, json, jerr } from './_lib.js';
+// ProxyGoaL rotation endpoint.
+import { pool, normalizeProxy, requestDirect, requestJsonThroughProxy, loadCandidates, json, jerr } from './_lib.js';
 
-export const config = { runtime: 'nodejs', maxDuration: 10 };
+export const config = { runtime: 'nodejs20.x', maxDuration: 10 };
 
-const TIMEOUT_MS = 8000;
-
-async function fetchThroughProxy(proxyUrl) {
-  const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
-  try {
-    const opts = {
-      signal: ctrl.signal,
-      headers: {
-        'User-Agent': 'ProxyGoaL/2.1 (+https://github.com/humayunshariarhimu)',
-        Accept: 'application/json'
-      },
-      redirect: 'follow'
-    };
-    if (proxyUrl) {
-      opts.agent = new HttpsProxyAgent(proxyUrl, {
-        rejectUnauthorized: false,
-        timeout: TIMEOUT_MS
-      });
-    }
-    const r = await fetch('https://ipinfo.io/json', opts);
-    if (!r.ok) throw new Error('ipinfo HTTP ' + r.status);
-    return await r.json();
-  } finally {
-    clearTimeout(t);
-  }
+function output(data, proxy, latency, poolSize) {
+  const [lat = '', lon = ''] = String(data.loc || ',').split(',');
+  return {
+    ok: true,
+    ip: data.ip || '0.0.0.0',
+    country: data.country || '',
+    city: data.city || '',
+    region: data.region || '',
+    isp: data.org || '',
+    org: data.org || '',
+    asn: data.org || '',
+    timezone: data.timezone || '',
+    lat, lon,
+    proxy,
+    latency,
+    poolSize,
+    ts: Date.now()
+  };
 }
 
 export default async function handler(req, res) {
-  const t0 = Date.now();
+  const started = Date.now();
+  const mode = ['direct', 'free', 'auto'].includes(req.query?.mode) ? req.query.mode : 'auto';
   try {
-    const mode = ['direct', 'free', 'auto'].includes(req.query?.mode) ? req.query.mode : 'auto';
-
-    let proxyUrl = null;
-    let proxyLabel = 'direct';
-
-    if (mode !== 'direct') {
-      // Priority: ROTATING_PROXY_URL > user PROXY_LIST > pool
-      const endpoint = (process.env.ROTATING_PROXY_URL || '').trim();
-      if (endpoint && mode !== 'free') {
-        proxyUrl = normalizeProxy(endpoint);
-        proxyLabel = 'endpoint';
-      } else {
-        // user pool
-        const userPool = (process.env.PROXY_LIST || '')
-          .split(',').map((s) => s.trim()).filter(Boolean);
-        const combined = [...userPool.map((u) => ({ proxy: normalizeProxy(u), user: true })),
-                          ...pool.working.map((p) => ({ proxy: p.proxy, user: false }))];
-        if (combined.length) {
-          const pick = combined[Math.floor(Math.random() * combined.length)];
-          proxyUrl = pick.proxy;
-          proxyLabel = pick.user ? 'user' : 'pool:' + (pick.proxy.split('//')[1] || '');
-        }
-      }
+    if (mode === 'direct') {
+      const data = await requestDirect();
+      return json(res, 200, output(data, 'direct', Date.now() - started, pool.working.length));
     }
 
-    if (mode !== 'direct' && !proxyUrl) {
-      return jerr(res, 503, 'proxy pool empty — click REFRESH PROXY POOL', {
-        proxy: 'none', poolSize: pool.working.length, latency: Date.now() - t0
-      });
+    const endpoint = mode !== 'free' ? normalizeProxy(process.env.ROTATING_PROXY_URL) : null;
+    const configured = mode !== 'free'
+      ? (process.env.PROXY_LIST || '').split(',').map(normalizeProxy).filter(Boolean)
+      : [];
+
+    if (endpoint) {
+      const result = await requestJsonThroughProxy(endpoint, 7000);
+      if (result) return json(res, 200, output(result.data, 'endpoint', Date.now() - started, pool.working.length));
     }
 
-    const data = await fetchThroughProxy(proxyUrl);
-    const [lat = '', lon = ''] = (data.loc || ',').split(',');
+    const choices = [...configured, ...pool.working.map((item) => item.proxy).filter(Boolean)];
+    if (choices.length === 0) {
+      const candidates = await loadCandidates(false);
+      const fresh = candidates.filter((candidate) => !pool.seen.has(candidate)).slice(0, 8);
+      fresh.forEach((candidate) => pool.seen.add(candidate));
+      const working = await Promise.all(fresh.map(async (hostPort) => {
+        const proxy = normalizeProxy(hostPort);
+        const result = await requestJsonThroughProxy(proxy, 3000);
+        return result ? { proxy, latency: result.latency } : null;
+      }));
+      working.filter(Boolean).forEach((item) => pool.working.push(item));
+      pool.working = pool.working.slice(-100);
+      pool.stats.tested += fresh.length;
+      pool.stats.working = pool.working.length;
+    }
 
-    return json(res, 200, {
-      ok: true,
-      ip: data.ip || '0.0.0.0',
-      country: data.country || '',
-      city: data.city || '',
-      region: data.region || '',
-      isp: data.org || '',
-      org: data.org || '',
-      asn: data.org || '',
-      timezone: data.timezone || '',
-      lat, lon,
-      proxy: proxyLabel,
-      latency: Date.now() - t0,
-      poolSize: pool.working.length,
-      ts: Date.now()
+    const available = [...configured, ...pool.working.map((item) => item.proxy).filter(Boolean)];
+    for (const proxy of available.sort(() => Math.random() - 0.5).slice(0, 6)) {
+      const result = await requestJsonThroughProxy(proxy, 3500);
+      if (result) return json(res, 200, output(result.data, proxy, Date.now() - started, pool.working.length));
+      pool.working = pool.working.filter((item) => item.proxy !== proxy);
+    }
+
+    return jerr(res, 503, 'No working proxy found. Refresh the pool and try again.', {
+      proxy: 'none', poolSize: pool.working.length, latency: Date.now() - started
     });
-  } catch (err) {
-    return jerr(res, 502, err?.message || 'proxy request failed', {
-      proxy: 'auto', latency: Date.now() - t0,
-      poolSize: pool.working.length
+  } catch (error) {
+    return jerr(res, 502, error?.message || 'proxy request failed', {
+      proxy: 'auto', poolSize: pool.working.length, latency: Date.now() - started
     });
   }
 }

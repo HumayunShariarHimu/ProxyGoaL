@@ -1,5 +1,5 @@
-// api/_lib.js — shared helpers (underscore prefix = NOT a serverless endpoint)
-// Author: Humayun Shariar Himu
+// ProxyGoaL shared serverless utilities.
+import { HttpProxyAgent } from 'http-proxy-agent';
 import { HttpsProxyAgent } from 'https-proxy-agent';
 import fetch from 'node-fetch';
 
@@ -9,108 +9,141 @@ export const SOURCES = [
   'https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/http.txt',
   'https://raw.githubusercontent.com/clarketm/proxy-list/master/proxy-list-raw.txt',
   'https://raw.githubusercontent.com/ALIILAPRO/Proxy/main/http.txt',
-  'https://raw.githubusercontent.com/theriturajps/proxy-list/main/proxies/http.txt',
-  'https://raw.githubusercontent.com/officialputuid/KangProxy/KangProxy/http/http.txt',
   'https://raw.githubusercontent.com/hookzof/socks5_list/master/proxy.txt'
 ];
 
-export function normalizeProxy(u) {
-  if (!u) return null;
-  u = u.trim();
-  return /^https?:\/\//i.test(u) ? u : 'http://' + u;
+export function normalizeProxy(value) {
+  if (!value) return null;
+  const raw = String(value).trim();
+  if (!raw) return null;
+  return /^https?:\/\//i.test(raw) ? raw : `http://${raw}`;
 }
 
 export function parseLine(line) {
-  const s = (line || '').trim();
-  if (!s || s.startsWith('#')) return null;
-  if (/^https?:\/\//i.test(s)) {
-    const m = s.match(/^https?:\/\/([^:]+):(\d+)/);
-    return m ? `${m[1]}:${m[2]}` : null;
-  }
-  const m = s.match(/^(\d{1,3}(?:\.\d{1,3}){3}):(\d{2,5})$/);
-  return m ? `${m[1]}:${m[2]}` : null;
+  const value = String(line || '').trim();
+  if (!value || value.startsWith('#')) return null;
+  const match = value.match(/^(?:https?:\/\/)?((?:\d{1,3}\.){3}\d{1,3}):(\d{2,5})$/i);
+  if (!match) return null;
+  const octets = match[1].split('.').map(Number);
+  if (octets.some((part) => part < 0 || part > 255)) return null;
+  return `${match[1]}:${match[2]}`;
 }
 
-export async function fetchSource(url, timeoutMs = 6000) {
-  const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(), timeoutMs);
+export async function fetchSource(url, timeoutMs = 5000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const r = await fetch(url, {
-      signal: ctrl.signal,
-      headers: { 'User-Agent': 'ProxyGoaL/2.1' },
+    const response = await fetch(url, {
+      signal: controller.signal,
+      headers: { 'User-Agent': 'ProxyGoaL/2.2' },
       redirect: 'follow'
     });
-    if (!r.ok) return [];
-    const text = await r.text();
-    const out = new Set();
-    text.split(/\r?\n/).forEach((l) => {
-      const p = parseLine(l);
-      if (p) out.add(p);
-    });
-    return Array.from(out);
+    if (!response.ok) return [];
+    const text = await response.text();
+    const values = new Set();
+    for (const line of text.split(/\r?\n/)) {
+      const parsed = parseLine(line);
+      if (parsed) values.add(parsed);
+    }
+    return [...values];
   } catch {
     return [];
   } finally {
-    clearTimeout(t);
+    clearTimeout(timer);
   }
 }
 
-export async function testProxy(hostPort, timeoutMs = 3500) {
-  const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(), timeoutMs);
-  const t0 = Date.now();
+function proxyAgent(proxyUrl, targetUrl) {
+  return targetUrl.startsWith('https:')
+    ? new HttpsProxyAgent(proxyUrl, { rejectUnauthorized: false })
+    : new HttpProxyAgent(proxyUrl);
+}
+
+export async function requestJsonThroughProxy(proxyUrl, timeoutMs = 3500) {
+  const target = 'http://ipinfo.io/json';
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const started = Date.now();
   try {
-    const agent = new HttpsProxyAgent('http://' + hostPort, {
-      rejectUnauthorized: false,
-      timeout: timeoutMs
-    });
-    const r = await fetch('http://ipinfo.io/ip', {
-      agent,
-      signal: ctrl.signal,
-      headers: { 'User-Agent': 'ProxyGoaL/2.1', Accept: 'text/plain' },
+    const response = await fetch(target, {
+      agent: proxyAgent(proxyUrl, target),
+      signal: controller.signal,
+      headers: { 'User-Agent': 'ProxyGoaL/2.2', Accept: 'application/json' },
       redirect: 'follow'
     });
-    if (!r.ok) return null;
-    const ip = (await r.text()).trim();
-    if (!/^\d{1,3}(?:\.\d{1,3}){3}$/.test(ip)) return null;
-    return { proxy: 'http://' + hostPort, hostPort, exitIp: ip, latency: Date.now() - t0 };
+    if (!response.ok) return null;
+    const data = await response.json();
+    if (!data?.ip || !/^\d{1,3}(?:\.\d{1,3}){3}$/.test(data.ip)) return null;
+    return { data, latency: Date.now() - started };
   } catch {
     return null;
   } finally {
-    clearTimeout(t);
+    clearTimeout(timer);
+  }
+}
+
+export async function requestDirect(timeoutMs = 5000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch('https://ipinfo.io/json', {
+      signal: controller.signal,
+      headers: { 'User-Agent': 'ProxyGoaL/2.2', Accept: 'application/json' },
+      redirect: 'follow'
+    });
+    if (!response.ok) throw new Error(`ipinfo HTTP ${response.status}`);
+    return await response.json();
+  } finally {
+    clearTimeout(timer);
   }
 }
 
 export async function runPool(items, limit, worker) {
   const results = [];
-  let i = 0;
-  const runners = Array.from({ length: Math.min(limit, items.length) }, async () => {
-    while (i < items.length) {
-      const idx = i++;
+  let cursor = 0;
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (cursor < items.length) {
+      const item = items[cursor++];
       try {
-        const r = await worker(items[idx]);
-        if (r) results.push(r);
-      } catch { /* skip */ }
+        const result = await worker(item);
+        if (result) results.push(result);
+      } catch { /* ignore dead public proxies */ }
     }
   });
-  await Promise.all(runners);
+  await Promise.all(workers);
   return results;
 }
 
-// In-memory pool (survives warm invocations)
 export const pool = {
   working: [],
-  ts: 0,
-  building: false,
+  candidates: [],
   seen: new Set(),
+  sourceTs: 0,
+  building: false,
   stats: { sources: 0, candidates: 0, tested: 0, working: 0 }
 };
 
-export function json(res, status, obj) {
+export async function loadCandidates(force = false) {
+  const fresh = !force && pool.candidates.length && Date.now() - pool.sourceTs < 5 * 60 * 1000;
+  if (fresh) return pool.candidates;
+  const results = await Promise.all(SOURCES.map((source) => fetchSource(source)));
+  const unique = [...new Set(results.flat())];
+  for (let i = unique.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [unique[i], unique[j]] = [unique[j], unique[i]];
+  }
+  pool.candidates = unique;
+  pool.sourceTs = Date.now();
+  pool.stats.sources = results.filter((list) => list.length > 0).length;
+  pool.stats.candidates = unique.length;
+  return unique;
+}
+
+export function json(res, status, payload) {
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
-  res.setHeader('Cache-Control', 'no-store');
+  res.setHeader('Cache-Control', 'no-store, max-age=0');
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.status(status).send(JSON.stringify(obj));
+  res.status(status).send(JSON.stringify(payload));
 }
 
 export function jerr(res, status, error, extra = {}) {
