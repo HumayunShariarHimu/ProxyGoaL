@@ -452,7 +452,7 @@ select:focus{border-color:var(--line-hot);box-shadow:0 0 8px rgba(0,255,156,.55)
   const state={
     running:false, timer:null, rotations:0,
     uniqueIps:new Set(), countries:new Set(), latencies:[],
-    recent:[], busy:false, consecutiveErrors:0,
+    recent:[], busy:false, consecutiveErrors:0, lastProxy:'',
     backendOk:null // null=unknown, true/false
   };
 
@@ -495,7 +495,8 @@ select:focus{border-color:var(--line-hot);box-shadow:0 0 8px rgba(0,255,156,.55)
     const mode=modeSel.value;
     modeBadge.textContent=mode.toUpperCase();
     try{
-      const d = await fetchJson(`/api/rotate?mode=${mode}&_=${Date.now()}`);
+      const previous = state.lastProxy ? `&previous=${encodeURIComponent(state.lastProxy)}` : '';
+      const d = await fetchJson(`/api/rotate?mode=${mode}${previous}&_=${Date.now()}`);
       if(d.ok){state.consecutiveErrors=0;applyResult(d);}
       else{state.consecutiveErrors++;applyError(d);}
     }catch(e){state.consecutiveErrors++;applyError({error:e.message,proxy:mode,latency:0});}
@@ -503,6 +504,7 @@ select:focus{border-color:var(--line-hot);box-shadow:0 0 8px rgba(0,255,156,.55)
   }
 
   function applyResult(d){
+    state.lastProxy = d.proxy || '';
     state.rotations++;
     state.uniqueIps.add(d.ip);
     if(d.country) state.countries.add(d.country);
