@@ -34,6 +34,7 @@ export default async function handler(req, res) {
     const previous = String(req.query?.previous || '').trim();
     const previousIp = String(req.query?.previousIp || '').trim();
     const excludedIps = new Set(String(req.query?.excludeIps || '').split(',').map((ip) => ip.trim()).filter(Boolean));
+    const requestedProxy = normalizeProxy(req.query?.proxy || '');
     const configured = mode !== 'free'
       ? (process.env.PROXY_LIST || '').split(',').map(normalizeProxy).filter(Boolean)
       : [];
@@ -41,6 +42,13 @@ export default async function handler(req, res) {
     if (endpoint) {
       const result = await requestJsonThroughProxy(endpoint, 7000);
       if (result) return json(res, 200, output(result.data, 'endpoint', Date.now() - started, pool.working.length));
+    }
+
+    if (requestedProxy && requestedProxy !== previous) {
+      const result = await requestJsonThroughProxy(requestedProxy, 5000);
+      if (result && result.data.ip !== previousIp && !excludedIps.has(result.data.ip)) {
+        return json(res, 200, output(result.data, requestedProxy, Date.now() - started, pool.working.length));
+      }
     }
 
     let choices = [...configured, ...pool.working.map((item) => item.proxy).filter(Boolean)];
