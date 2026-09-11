@@ -530,11 +530,12 @@ select:focus{border-color:var(--line-hot);box-shadow:0 0 8px rgba(0,255,156,.55)
   }
 
   function applyError(d){
-    log(`ROTATION FAILED (${d.proxy||'direct'}): ${d.error}`,'err');
-    pushRecent({ip:'ERR',country:'',city:d.error||'failed',latency:d.latency||0,bad:true});
+    const message = d.error || 'No distinct working exit IP was available';
+    log(`ROTATION FAILED (${d.proxy||'free-pool'}): ${message}`,'err');
+    pushRecent({ip:'ERR',country:'',city:message,bad:true,latency:d.latency||0});
     setStatus('error','ERROR');
     updateStats();
-    if(state.consecutiveErrors>=5 && state.running){
+    if(state.consecutiveErrors>=3 && state.running){
       log('too many failures → pausing & refreshing pool…','warn');
       stopRotation();
       setTimeout(()=>refreshPool(),500);
